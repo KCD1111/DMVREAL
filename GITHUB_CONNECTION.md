@@ -10,7 +10,7 @@ Your local Git repository is initialized and your first commit is created!
 2. **Sign in** (or create account if needed)
 3. **Click the "+" icon** (top right) → "New repository"
 4. **Repository settings**:
-   - **Name**: `dmv-ocr-validator` (or any name you like)
+   - **Name**: `DMVREAL` ✅ (you already created this!)
    - **Description**: "DMV Document OCR Validator with address extraction"
    - **Visibility**: 
      - ✅ **Private** (recommended - only you and your partner can see)
@@ -21,13 +21,13 @@ Your local Git repository is initialized and your first commit is created!
 
 ## Step 3: Connect Local Git to GitHub
 
-After creating the repository, GitHub will show you commands. Use these:
+After creating the repository, connect it with these commands:
 
 ```bash
 cd /Users/octane.hinojosa/WEB
 
-# Add GitHub as remote (replace YOUR_USERNAME and REPO_NAME)
-git remote add origin https://github.com/YOUR_USERNAME/REPO_NAME.git
+# Add GitHub as remote (replace YOUR_USERNAME with your GitHub username)
+git remote add origin https://github.com/YOUR_USERNAME/DMVREAL.git
 
 # Rename branch to main (if needed)
 git branch -M main
@@ -37,12 +37,14 @@ git push -u origin main
 ```
 
 **Example:**
-If your GitHub username is `johndoe` and repo name is `dmv-ocr-validator`:
+If your GitHub username is `johndoe`:
 ```bash
-git remote add origin https://github.com/johndoe/dmv-ocr-validator.git
+git remote add origin https://github.com/johndoe/DMVREAL.git
 git branch -M main
 git push -u origin main
 ```
+
+**Your Repository Name:** `DMVREAL`
 
 ## Step 4: Set Up Git User (Optional but Recommended)
 
@@ -65,8 +67,8 @@ Once you've pushed to GitHub, your partner should:
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/REPO_NAME.git
-   cd REPO_NAME
+   git clone https://github.com/YOUR_USERNAME/DMVREAL.git
+   cd DMVREAL
    ```
 
 2. **Set up environment**:
