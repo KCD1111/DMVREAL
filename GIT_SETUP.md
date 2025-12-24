@@ -40,7 +40,7 @@ git add web.html backend_driverlic.py requirements.txt README.md start_server.* 
 git commit -m "Initial commit - DMV OCR Validator"
 
 # Add GitHub repository (replace YOUR_USERNAME and REPO_NAME)
-git remote add origin https://github.com/YOUR_USERNAME/REPO_NAME.git
+git remote add origin https://github.com/KCD1111/DMVREAL.git
 
 # Push to GitHub
 git branch -M main
@@ -53,7 +53,7 @@ Your partner should run:
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/REPO_NAME.git
+git remote add origin https://github.com/KCD1111/DMVREAL.git
 cd REPO_NAME
 
 # Set up virtual environment
