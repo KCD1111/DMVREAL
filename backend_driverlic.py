@@ -17,11 +17,10 @@ document_schema = {
     'license_number': {'type': 'string', 'required': True, 'format': 'alphanumeric'},
     'date_of_birth': {'type': 'date', 'required': True, 'format': 'MM/DD/YYYY'},
     'expiration_date': {'type': 'date', 'required': True, 'format': 'MM/DD/YYYY'},
-    'street_address': {'type': 'string', 'required': False},    # ← NEW
-    'city': {'type': 'string', 'required': False},              # ← NEW
-    'state': {'type': 'string', 'required': False},             # ← NEW
-    'zip_code': {'type': 'string', 'required': False},          # ← NEW
-    'full_address': {'type': 'string', 'required': False},      # ← NEW
+    'street_address': {'type': 'string', 'required': False},
+    'city': {'type': 'string', 'required': False},
+    'state': {'type': 'string', 'required': False},
+    'zip_code': {'type': 'string', 'required': False},
     'sex': {'type': 'string', 'required': False, 'allowed_values': ['M', 'F']}
 }
 
@@ -108,7 +107,6 @@ def extract_structured_data(ocr_pdf_path):
         data['city'] = city
         data['state'] = state
         data['zip_code'] = zip_code
-        data['full_address'] = f"{street}, {city}, {state} {zip_code}"
         
         print(f"\n✓ Found complete address:")
         print(f"  Street: {street}")
@@ -141,7 +139,6 @@ def extract_structured_data(ocr_pdf_path):
                     data['city'] = city_match.group(1).strip()
                     data['state'] = city_match.group(2).strip().upper()
                     data['zip_code'] = city_match.group(3).strip()
-                    data['full_address'] = f"{data['street_address']}, {data['city']}, {data['state']} {data['zip_code']}"
                     print(f"  ✓ City: {data['city']}")
                     print(f"  ✓ State: {data['state']}")
                     print(f"  ✓ Zip: {data['zip_code']}")
@@ -179,12 +176,11 @@ def normalize_ocr_data(ocr_data, document_schema):
         'expiry': 'expiration_date',
         'exp_date': 'expiration_date',
         'DLN': 'license_number',
-        # Keep address fields separate - DON'T map them all to 'address'
-        'street_address': 'street_address',    # ← NEW
-        'city': 'city',                        # ← NEW
-        'state': 'state',                      # ← NEW
-        'zip_code': 'zip_code',                # ← NEW
-        'full_address': 'full_address',        # ← NEW
+        # Keep address fields separate
+        'street_address': 'street_address',
+        'city': 'city',
+        'state': 'state',
+        'zip_code': 'zip_code',
         'sex': 'sex'
     }
 

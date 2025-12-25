@@ -37,7 +37,7 @@ git init
 git add web.html backend_driverlic.py requirements.txt README.md start_server.* .gitignore
 
 # Create first commit
-git commit -m "Initial commit - DMV OCR Validator"
+git commit -m "Initial commit - DMVREAL"
 
 # Add GitHub repository (replace YOUR_USERNAME and REPO_NAME)
 git remote add origin https://github.com/KCD1111/DMVREAL.git
