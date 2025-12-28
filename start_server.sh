@@ -29,9 +29,16 @@ if ! command -v tesseract &> /dev/null; then
     echo ""
 fi
 
+# Check if Ollama is running
+if ! curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+    echo "WARNING: Ollama is not running!"
+    echo "Please start Ollama in another terminal: ollama serve"
+    echo ""
+fi
+
 # Start backend server in background
 echo "Starting backend server on port 5001..."
-python py > flask_server.log 2>&1 &
+python backend_driverlic.py > flask_server.log 2>&1 &
 BACKEND_PID=$!
 
 # Wait a moment for server to start
