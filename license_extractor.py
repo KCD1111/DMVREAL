@@ -35,7 +35,11 @@ class LicenseExtractor:
         normalized['zip_code'] = self._normalize_zip(extracted_data.get('zip_code'))
         normalized['sex'] = self._normalize_sex(extracted_data.get('sex'))
 
-        normalized['confidence'] = extracted_data.get('confidence', {})
+        # Ensure confidence is always a dictionary
+        confidence = extracted_data.get('confidence', {})
+        if not isinstance(confidence, dict):
+            confidence = {}
+        normalized['confidence'] = confidence
 
         return normalized
 
@@ -178,6 +182,10 @@ class LicenseExtractor:
                 })
 
         confidence_scores = normalized_data.get('confidence', {})
+        # Ensure confidence_scores is a dictionary before calling .items()
+        if not isinstance(confidence_scores, dict):
+            confidence_scores = {}
+        
         for field, score in confidence_scores.items():
             if isinstance(score, (int, float)) and score < 0.7:
                 validation_report['warnings'].append({
@@ -195,7 +203,7 @@ class LicenseExtractor:
             return False
 
     def calculate_confidence_summary(self, confidence_scores: Dict[str, float]) -> float:
-        if not confidence_scores:
+        if not confidence_scores or not isinstance(confidence_scores, dict):
             return 0.0
 
         scores = [v for v in confidence_scores.values() if isinstance(v, (int, float))]
