@@ -46,18 +46,31 @@ class LicenseExtractor:
     def _normalize_name(self, name):
         if not name or name == 'null':
             return None
-        return name.strip().title()
+        name_str = str(name).strip()
+        # Filter out placeholder text
+        placeholder_keywords = ['string', 'null', 'or', 'name']
+        if any(keyword in name_str.lower() for keyword in placeholder_keywords) and len(name_str.split()) > 2:
+            return None
+        return name_str.title()
 
     def _normalize_license_number(self, license_num):
         if not license_num or license_num == 'null':
             return None
-        return re.sub(r'\s+', '', str(license_num).strip().upper())
+        license_str = str(license_num).strip()
+        # Filter out placeholder text
+        if 'string' in license_str.lower() or 'or' in license_str.lower():
+            return None
+        return re.sub(r'\s+', '', license_str.upper())
 
     def _normalize_date(self, date_str):
         if not date_str or date_str == 'null':
             return None
 
         date_str = str(date_str).strip()
+
+        # Filter out placeholder text like "MM/DD/YYYY or null"
+        if 'or' in date_str.lower() or date_str.upper() == 'MM/DD/YYYY' or date_str.upper() == 'DD/MM/YYYY':
+            return None
 
         formats = [
             '%m/%d/%Y', '%m-%d-%Y', '%Y-%m-%d', '%Y/%m/%d',
@@ -74,46 +87,63 @@ class LicenseExtractor:
             except ValueError:
                 continue
 
-        return date_str
+        return None
 
     def _normalize_address(self, address):
         if not address or address == 'null':
             return None
-        return address.strip()
+        address_str = str(address).strip()
+        # Filter out placeholder text
+        if 'string' in address_str.lower() or 'or null' in address_str.lower():
+            return None
+        return address_str
 
     def _normalize_city(self, city):
         if not city or city == 'null':
             return None
-        return city.strip().title()
+        city_str = str(city).strip()
+        # Filter out placeholder text
+        if 'string' in city_str.lower() or 'or null' in city_str.lower():
+            return None
+        return city_str.title()
 
     def _normalize_state(self, state):
         if not state or state == 'null':
             return None
-        state = state.strip().upper()
-        if state in self.STATE_ABBREVIATIONS:
-            return state
-        return state
+        state_str = str(state).strip().upper()
+        # Filter out placeholder text
+        if 'LETTER' in state_str or 'CODE' in state_str or 'OR' in state_str:
+            return None
+        if state_str in self.STATE_ABBREVIATIONS:
+            return state_str
+        return None
 
     def _normalize_zip(self, zip_code):
         if not zip_code or zip_code == 'null':
             return None
         zip_str = str(zip_code).strip()
+        # Filter out placeholder text
+        if 'string' in zip_str.lower() or 'or null' in zip_str.lower():
+            return None
         zip_match = re.match(r'(\d{5})(?:-?(\d{4}))?', zip_str)
         if zip_match:
             if zip_match.group(2):
                 return f"{zip_match.group(1)}-{zip_match.group(2)}"
             return zip_match.group(1)
-        return zip_str
+        return None
 
     def _normalize_sex(self, sex):
         if not sex or sex == 'null':
             return None
-        sex = sex.strip().upper()
-        if sex in ['M', 'MALE']:
+        sex_str = str(sex).strip().upper()
+        # Filter out placeholder text like "M OR F OR NULL"
+        if 'OR' in sex_str or 'NULL' in sex_str:
+            return None
+        if sex_str in ['M', 'MALE']:
             return 'M'
-        elif sex in ['F', 'FEMALE']:
+        elif sex_str in ['F', 'FEMALE']:
             return 'F'
-        return sex
+        return None
 
     def validate_data(self, normalized_data: Dict[str, Any]) -> Dict[str, List]:
         validation_report = {

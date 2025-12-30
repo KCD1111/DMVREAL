@@ -177,12 +177,12 @@ class ModelManager:
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=512,
-                temperature=0.3,
+                max_new_tokens=600,
+                temperature=0.1,
                 do_sample=True,
-                top_p=0.85,
-                top_k=40,
-                repetition_penalty=1.1,
+                top_p=0.9,
+                top_k=50,
+                repetition_penalty=1.15,
                 pad_token_id=tokenizer.eos_token_id,
                 eos_token_id=tokenizer.eos_token_id
             )
@@ -194,64 +194,84 @@ class ModelManager:
         return extracted_data
 
     def _build_extraction_prompt(self, ocr_text):
-        ocr_text_trimmed = ocr_text[:800] if len(ocr_text) > 800 else ocr_text
+        ocr_text_trimmed = ocr_text[:1200] if len(ocr_text) > 1200 else ocr_text
         return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-You are a data extraction assistant. Extract driver's license information from OCR text and return ONLY valid JSON. No explanations, no extra text.<|eot_id|><|start_header_id|>user<|end_header_id|>
-Extract the following fields from this driver's license OCR text:
+You are an expert at extracting information from driver's licenses. Your job is to read OCR text and extract the ACTUAL data values, not placeholder text. Return only valid JSON with the real extracted values.<|eot_id|><|start_header_id|>user<|end_header_id|>
+Here is an example of how to extract data:
+
+Example OCR Text:
+"CALIFORNIA DRIVER LICENSE D1234567 1 JOHN 2 SMITH DOB 03/15/1985 4b EXP 03/15/2028 8 123 MAIN ST SACRAMENTO, CA 95814 15 SEX M"
+
+Example Output:
+{{
+  "first_name": "JOHN",
+  "last_name": "SMITH",
+  "license_number": "D1234567",
+  "date_of_birth": "03/15/1985",
+  "expiration_date": "03/15/2028",
+  "street_address": "123 MAIN ST",
+  "city": "SACRAMENTO",
+  "state": "CA",
+  "zip_code": "95814",
+  "sex": "M",
+  "confidence": {{"first_name": 0.95, "last_name": 0.95, "license_number": 0.95, "date_of_birth": 0.95, "expiration_date": 0.95, "street_address": 0.90, "city": 0.90, "state": 0.95, "zip_code": 0.90, "sex": 0.95}}
+}}
+
+Now extract the ACTUAL values from this driver's license OCR text:
 
 {ocr_text_trimmed}
 
-Return ONLY this JSON structure (use null for missing fields):
-{{
-  "first_name": "string or null",
-  "last_name": "string or null",
-  "license_number": "string or null",
-  "date_of_birth": "MM/DD/YYYY or null",
-  "expiration_date": "MM/DD/YYYY or null",
-  "street_address": "string or null",
-  "city": "string or null",
-  "state": "2-letter code or null",
-  "zip_code": "string or null",
-  "sex": "M or F or null",
-  "confidence": {{
-    "first_name": 0.9,
-    "last_name": 0.9,
-    "license_number": 0.9,
-    "date_of_birth": 0.9,
-    "expiration_date": 0.9,
-    "street_address": 0.9,
-    "city": 0.9,
-    "state": 0.9,
-    "zip_code": 0.9,
-    "sex": 0.9
-  }}
-}}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-"""
+IMPORTANT: Extract the REAL values you see in the text above, NOT placeholder text. Return ONLY valid JSON with actual extracted data. Use null only if the field is truly missing.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+{{"""
 
     def _parse_llama_response(self, response):
         import json
         import re
 
-        logger.debug(f"LLAMA raw response: {response[:500]}...")
+        logger.info(f"LLAMA raw response length: {len(response)} characters")
+        logger.info(f"LLAMA response preview: {response[:200]}...")
 
+        if len(response) > 300:
+            logger.info(f"LLAMA response end: ...{response[-200:]}")
+
+        # Extract JSON from assistant's response
+        # The prompt ends with '{' so the model should continue from there
+        assistant_marker = "<|start_header_id|>assistant<|end_header_id|>"
+        if assistant_marker in response:
+            response = response.split(assistant_marker)[-1].strip()
+            logger.info(f"Extracted assistant portion: {response[:200]}...")
+
+        # Try to find complete JSON object
         json_patterns = [
-            r'\{[^\}]*"first_name"[^\{]*\{[^\}]*\}[^\}]*\}',
-            r'\{.*?\}(?=\s*$)',
-            r'\{.*\}',
+            r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Nested JSON with one level
+            r'\{.*?"first_name".*?\}',  # JSON containing first_name
+            r'\{.*?\}',  # Any JSON object
         ]
 
         for pattern in json_patterns:
             json_match = re.search(pattern, response, re.DOTALL)
             if json_match:
                 json_str = json_match.group(0)
-                json_str = json_str.replace('\n', ' ').replace('\r', '')
-                json_str = re.sub(r',\s*}', '}', json_str)
-                json_str = re.sub(r',\s*]', ']', json_str)
+
+                # Clean up the JSON string
+                json_str = json_str.strip()
+                json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
+                json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
+
+                logger.info(f"Attempting to parse JSON: {json_str[:300]}...")
 
                 try:
                     data = json.loads(json_str)
-                    logger.info("Successfully parsed JSON from LLAMA response")
+                    logger.info("✓ Successfully parsed JSON from LLAMA response")
+                    logger.info(f"Extracted fields: {list(data.keys())}")
 
+                    # Validate that we have actual data, not placeholder text
+                    if data.get('first_name') and isinstance(data['first_name'], str):
+                        if 'string' in data['first_name'].lower() or 'null' in data['first_name'].lower():
+                            logger.warning("Model returned placeholder text instead of actual data!")
+                            continue
+
+                    # Ensure all expected fields exist
                     default_structure = {
                         "first_name": None,
                         "last_name": None,
@@ -277,14 +297,31 @@ Return ONLY this JSON structure (use null for missing fields):
                         }
                     }
                     default_structure.update(data)
+
+                    # Ensure confidence is a dict
+                    if not isinstance(default_structure.get('confidence'), dict):
+                        default_structure['confidence'] = default_structure['confidence'] if isinstance(default_structure.get('confidence'), dict) else {
+                            "first_name": 0.5,
+                            "last_name": 0.5,
+                            "license_number": 0.5,
+                            "date_of_birth": 0.5,
+                            "expiration_date": 0.5,
+                            "street_address": 0.5,
+                            "city": 0.5,
+                            "state": 0.5,
+                            "zip_code": 0.5,
+                            "sex": 0.5
+                        }
+
                     return default_structure
 
                 except json.JSONDecodeError as e:
                     logger.warning(f"JSON parse attempt failed: {e}")
+                    logger.warning(f"Failed JSON string: {json_str[:200]}...")
                     continue
 
-        logger.error("Failed to parse JSON from LLAMA response after all attempts")
-        logger.error(f"Response preview: {response[:300]}")
+        logger.error("✗ Failed to parse valid JSON from LLAMA response after all attempts")
+        logger.error(f"Full response: {response}")
 
         return {
             "first_name": None,
