@@ -177,12 +177,13 @@ class ModelManager:
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=600,
-                temperature=0.1,
+                max_new_tokens=650,
+                temperature=0.2,
                 do_sample=True,
-                top_p=0.9,
-                top_k=50,
-                repetition_penalty=1.15,
+                top_p=0.92,
+                top_k=60,
+                repetition_penalty=1.2,
+                no_repeat_ngram_size=3,
                 pad_token_id=tokenizer.eos_token_id,
                 eos_token_id=tokenizer.eos_token_id
             )
@@ -194,34 +195,45 @@ class ModelManager:
         return extracted_data
 
     def _build_extraction_prompt(self, ocr_text):
-        ocr_text_trimmed = ocr_text[:1200] if len(ocr_text) > 1200 else ocr_text
+        ocr_text_trimmed = ocr_text[:1500] if len(ocr_text) > 1500 else ocr_text
+
+        # Log the OCR text being sent to the model
+        logger.info(f"Building prompt with OCR text: {ocr_text_trimmed[:200]}...")
+
         return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-You are an expert at extracting information from driver's licenses. Your job is to read OCR text and extract the ACTUAL data values, not placeholder text. Return only valid JSON with the real extracted values.<|eot_id|><|start_header_id|>user<|end_header_id|>
-Here is an example of how to extract data:
-
-Example OCR Text:
-"CALIFORNIA DRIVER LICENSE D1234567 1 JOHN 2 SMITH DOB 03/15/1985 4b EXP 03/15/2028 8 123 MAIN ST SACRAMENTO, CA 95814 15 SEX M"
-
-Example Output:
-{{
-  "first_name": "JOHN",
-  "last_name": "SMITH",
-  "license_number": "D1234567",
-  "date_of_birth": "03/15/1985",
-  "expiration_date": "03/15/2028",
-  "street_address": "123 MAIN ST",
-  "city": "SACRAMENTO",
-  "state": "CA",
-  "zip_code": "95814",
-  "sex": "M",
-  "confidence": {{"first_name": 0.95, "last_name": 0.95, "license_number": 0.95, "date_of_birth": 0.95, "expiration_date": 0.95, "street_address": 0.90, "city": 0.90, "state": 0.95, "zip_code": 0.90, "sex": 0.95}}
-}}
-
-Now extract the ACTUAL values from this driver's license OCR text:
+You extract structured data from driver's license OCR text. Read the text provided and output JSON with the extracted values.<|eot_id|><|start_header_id|>user<|end_header_id|>
+Extract information from this driver's license OCR output:
 
 {ocr_text_trimmed}
 
-IMPORTANT: Extract the REAL values you see in the text above, NOT placeholder text. Return ONLY valid JSON with actual extracted data. Use null only if the field is truly missing.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Parse the text above and fill in these fields with values you find:
+- first_name: Look for field "1" or "1HARRISON" or first name after "DRIVER" or "LICENSE"
+- last_name: Look for field "2" or surname
+- license_number: Look for "4d DLN" or "S###-###-###" format or alphanumeric ID near top
+- date_of_birth: Look for "3 DOB" or "3DOB" followed by date (format as MM/DD/YYYY)
+- expiration_date: Look for "4b EXP" or "4bEXP" followed by date (format as MM/DD/YYYY)
+- street_address: Look for field "8" followed by street number and name
+- city: Look for city name after address, before state
+- state: Look for 2-letter state code (like KY, CA, NY, TX)
+- zip_code: Look for 5-digit zip code
+- sex: Look for "15 SEX" or "SEX" followed by M or F
+
+Return this exact JSON structure with values from the OCR text above:
+{{
+  "first_name": "<extract from text>",
+  "last_name": "<extract from text>",
+  "license_number": "<extract from text>",
+  "date_of_birth": "<extract from text in MM/DD/YYYY format>",
+  "expiration_date": "<extract from text in MM/DD/YYYY format>",
+  "street_address": "<extract from text>",
+  "city": "<extract from text>",
+  "state": "<extract 2-letter code>",
+  "zip_code": "<extract from text>",
+  "sex": "<extract M or F>",
+  "confidence": {{"first_name": 0.9, "last_name": 0.9, "license_number": 0.9, "date_of_birth": 0.9, "expiration_date": 0.9, "street_address": 0.85, "city": 0.85, "state": 0.9, "zip_code": 0.85, "sex": 0.9}}
+}}
+
+Use null if field not found. Extract from the OCR text provided above only.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 {{"""
 
     def _parse_llama_response(self, response):
@@ -265,10 +277,18 @@ IMPORTANT: Extract the REAL values you see in the text above, NOT placeholder te
                     logger.info("✓ Successfully parsed JSON from LLAMA response")
                     logger.info(f"Extracted fields: {list(data.keys())}")
 
-                    # Validate that we have actual data, not placeholder text
+                    # Validate that we have actual data, not placeholder text or example data
                     if data.get('first_name') and isinstance(data['first_name'], str):
-                        if 'string' in data['first_name'].lower() or 'null' in data['first_name'].lower():
+                        first_name_lower = data['first_name'].lower()
+                        if 'string' in first_name_lower or 'null' in first_name_lower:
                             logger.warning("Model returned placeholder text instead of actual data!")
+                            continue
+                        if '<extract' in first_name_lower or 'extract from' in first_name_lower:
+                            logger.warning("Model returned template placeholder instead of extracting!")
+                            continue
+                        # Check if model returned the example data instead of extracting from OCR
+                        if first_name_lower == 'john' and data.get('last_name', '').lower() == 'smith':
+                            logger.warning("Model returned example data (John Smith) instead of extracting from OCR text!")
                             continue
 
                     # Ensure all expected fields exist
