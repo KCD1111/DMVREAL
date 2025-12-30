@@ -24,7 +24,7 @@ class DatabaseManager:
             return
 
         supabase_url = os.getenv('VITE_SUPABASE_URL')
-        supabase_key = os.getenv('VITE_SUPABASE_SUPABASE_ANON_KEY')
+        supabase_key = os.getenv('VITE_SUPABASE_ANON_KEY')
 
         if not supabase_url or not supabase_key:
             logger.warning("Supabase credentials not found. Database operations will be skipped.")

@@ -88,6 +88,9 @@ class ModelManager:
                     model_id,
                     use_fast=True
                 )
+                if self.llama_tokenizer.pad_token is None:
+                    self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
+
                 self.llama_model = AutoModelForCausalLM.from_pretrained(
                     model_id,
                     quantization_config=quantization_config,
@@ -111,6 +114,9 @@ class ModelManager:
                     model_id,
                     use_fast=True
                 )
+                if self.llama_tokenizer.pad_token is None:
+                    self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
+
                 self.llama_model = AutoModelForCausalLM.from_pretrained(
                     model_id,
                     torch_dtype=dtype,
@@ -163,7 +169,7 @@ class ModelManager:
 
         prompt = self._build_extraction_prompt(ocr_text)
 
-        inputs = tokenizer(prompt, return_tensors="pt")
+        inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024)
 
         if self.device == "mps":
             inputs = {k: v.to("mps") for k, v in inputs.items()}
@@ -171,12 +177,14 @@ class ModelManager:
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=256,
-                temperature=0.1,
+                max_new_tokens=512,
+                temperature=0.3,
                 do_sample=True,
-                top_p=0.9,
+                top_p=0.85,
+                top_k=40,
+                repetition_penalty=1.1,
                 pad_token_id=tokenizer.eos_token_id,
-                early_stopping=True
+                eos_token_id=tokenizer.eos_token_id
             )
 
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -187,28 +195,121 @@ class ModelManager:
 
     def _build_extraction_prompt(self, ocr_text):
         ocr_text_trimmed = ocr_text[:800] if len(ocr_text) > 800 else ocr_text
-        return f"""Extract US driver's license info from OCR text as JSON:
+        return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+You are a data extraction assistant. Extract driver's license information from OCR text and return ONLY valid JSON. No explanations, no extra text.<|eot_id|><|start_header_id|>user<|end_header_id|>
+Extract the following fields from this driver's license OCR text:
 
 {ocr_text_trimmed}
 
-Required fields: first_name, last_name, license_number, date_of_birth (MM/DD/YYYY), expiration_date (MM/DD/YYYY), street_address, city, state (2-letter), zip_code, sex (M/F), confidence (0.0-1.0 per field).
-
-Return only valid JSON. Use null if not found.
-
-JSON:"""
+Return ONLY this JSON structure (use null for missing fields):
+{{
+  "first_name": "string or null",
+  "last_name": "string or null",
+  "license_number": "string or null",
+  "date_of_birth": "MM/DD/YYYY or null",
+  "expiration_date": "MM/DD/YYYY or null",
+  "street_address": "string or null",
+  "city": "string or null",
+  "state": "2-letter code or null",
+  "zip_code": "string or null",
+  "sex": "M or F or null",
+  "confidence": {{
+    "first_name": 0.9,
+    "last_name": 0.9,
+    "license_number": 0.9,
+    "date_of_birth": 0.9,
+    "expiration_date": 0.9,
+    "street_address": 0.9,
+    "city": 0.9,
+    "state": 0.9,
+    "zip_code": 0.9,
+    "sex": 0.9
+  }}
+}}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+"""
 
     def _parse_llama_response(self, response):
         import json
         import re
 
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0))
-            except json.JSONDecodeError:
-                logger.error("Failed to parse JSON from LLAMA response")
-                return {}
-        return {}
+        logger.debug(f"LLAMA raw response: {response[:500]}...")
+
+        json_patterns = [
+            r'\{[^\}]*"first_name"[^\{]*\{[^\}]*\}[^\}]*\}',
+            r'\{.*?\}(?=\s*$)',
+            r'\{.*\}',
+        ]
+
+        for pattern in json_patterns:
+            json_match = re.search(pattern, response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                json_str = json_str.replace('\n', ' ').replace('\r', '')
+                json_str = re.sub(r',\s*}', '}', json_str)
+                json_str = re.sub(r',\s*]', ']', json_str)
+
+                try:
+                    data = json.loads(json_str)
+                    logger.info("Successfully parsed JSON from LLAMA response")
+
+                    default_structure = {
+                        "first_name": None,
+                        "last_name": None,
+                        "license_number": None,
+                        "date_of_birth": None,
+                        "expiration_date": None,
+                        "street_address": None,
+                        "city": None,
+                        "state": None,
+                        "zip_code": None,
+                        "sex": None,
+                        "confidence": {
+                            "first_name": 0.5,
+                            "last_name": 0.5,
+                            "license_number": 0.5,
+                            "date_of_birth": 0.5,
+                            "expiration_date": 0.5,
+                            "street_address": 0.5,
+                            "city": 0.5,
+                            "state": 0.5,
+                            "zip_code": 0.5,
+                            "sex": 0.5
+                        }
+                    }
+                    default_structure.update(data)
+                    return default_structure
+
+                except json.JSONDecodeError as e:
+                    logger.warning(f"JSON parse attempt failed: {e}")
+                    continue
+
+        logger.error("Failed to parse JSON from LLAMA response after all attempts")
+        logger.error(f"Response preview: {response[:300]}")
+
+        return {
+            "first_name": None,
+            "last_name": None,
+            "license_number": None,
+            "date_of_birth": None,
+            "expiration_date": None,
+            "street_address": None,
+            "city": None,
+            "state": None,
+            "zip_code": None,
+            "sex": None,
+            "confidence": {
+                "first_name": 0.0,
+                "last_name": 0.0,
+                "license_number": 0.0,
+                "date_of_birth": 0.0,
+                "expiration_date": 0.0,
+                "street_address": 0.0,
+                "city": 0.0,
+                "state": 0.0,
+                "zip_code": 0.0,
+                "sex": 0.0
+            }
+        }
 
     def process_sequential(self, image_paths):
         logger.info("Processing with sequential model loading (memory-efficient mode)")
