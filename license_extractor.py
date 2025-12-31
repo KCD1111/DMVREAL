@@ -7,7 +7,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class LicenseExtractor:
-    REQUIRED_FIELDS = ['first_name', 'last_name', 'license_number', 'date_of_birth', 'expiration_date']
+    REQUIRED_FIELDS = ['first_name', 'last_name', 'dln', 'date_of_birth', 'expiration_date']
     OPTIONAL_FIELDS = ['street_address', 'city', 'state', 'zip_code', 'sex']
 
     STATE_ABBREVIATIONS = [
@@ -26,7 +26,7 @@ class LicenseExtractor:
 
         normalized['first_name'] = self._normalize_name(extracted_data.get('first_name'))
         normalized['last_name'] = self._normalize_name(extracted_data.get('last_name'))
-        normalized['license_number'] = self._normalize_license_number(extracted_data.get('license_number'))
+        normalized['dln'] = self._normalize_license_number(extracted_data.get('dln'))
         normalized['date_of_birth'] = self._normalize_date(extracted_data.get('date_of_birth'))
         normalized['expiration_date'] = self._normalize_date(extracted_data.get('expiration_date'))
         normalized['street_address'] = self._normalize_address(extracted_data.get('street_address'))
@@ -34,12 +34,6 @@ class LicenseExtractor:
         normalized['state'] = self._normalize_state(extracted_data.get('state'))
         normalized['zip_code'] = self._normalize_zip(extracted_data.get('zip_code'))
         normalized['sex'] = self._normalize_sex(extracted_data.get('sex'))
-
-        # Ensure confidence is always a dictionary
-        confidence = extracted_data.get('confidence', {})
-        if not isinstance(confidence, dict):
-            confidence = {}
-        normalized['confidence'] = confidence
 
         return normalized
 
@@ -155,8 +149,7 @@ class LicenseExtractor:
         validation_report = {
             'missing_fields': [],
             'format_errors': [],
-            'invalid_values': [],
-            'warnings': []
+            'invalid_values': []
         }
 
         for field in self.REQUIRED_FIELDS:
@@ -171,17 +164,6 @@ class LicenseExtractor:
                     'value': normalized_data['date_of_birth'],
                     'error': 'Invalid date format'
                 })
-            else:
-                try:
-                    dob = datetime.datetime.strptime(normalized_data['date_of_birth'], '%m/%d/%Y')
-                    age = (datetime.datetime.now() - dob).days // 365
-                    if age < 16 or age > 120:
-                        validation_report['warnings'].append({
-                            'field': 'date_of_birth',
-                            'warning': f'Unusual age: {age} years'
-                        })
-                except Exception:
-                    pass
 
         if normalized_data.get('expiration_date'):
             if not self._is_valid_date_format(normalized_data['expiration_date']):
@@ -190,16 +172,6 @@ class LicenseExtractor:
                     'value': normalized_data['expiration_date'],
                     'error': 'Invalid date format'
                 })
-            else:
-                try:
-                    exp_date = datetime.datetime.strptime(normalized_data['expiration_date'], '%m/%d/%Y')
-                    if exp_date < datetime.datetime.now():
-                        validation_report['warnings'].append({
-                            'field': 'expiration_date',
-                            'warning': 'License is expired'
-                        })
-                except Exception:
-                    pass
 
         if normalized_data.get('state'):
             if normalized_data['state'] not in self.STATE_ABBREVIATIONS:
@@ -217,18 +189,6 @@ class LicenseExtractor:
                     'error': 'Sex must be M or F'
                 })
 
-        confidence_scores = normalized_data.get('confidence', {})
-        # Ensure confidence_scores is a dictionary before calling .items()
-        if not isinstance(confidence_scores, dict):
-            confidence_scores = {}
-        
-        for field, score in confidence_scores.items():
-            if isinstance(score, (int, float)) and score < 0.7:
-                validation_report['warnings'].append({
-                    'field': field,
-                    'warning': f'Low confidence score: {score:.2f}'
-                })
-
         return validation_report
 
     def _is_valid_date_format(self, date_str):
@@ -237,13 +197,3 @@ class LicenseExtractor:
             return True
         except ValueError:
             return False
-
-    def calculate_confidence_summary(self, confidence_scores: Dict[str, float]) -> float:
-        if not confidence_scores or not isinstance(confidence_scores, dict):
-            return 0.0
-
-        scores = [v for v in confidence_scores.values() if isinstance(v, (int, float))]
-        if not scores:
-            return 0.0
-
-        return sum(scores) / len(scores)

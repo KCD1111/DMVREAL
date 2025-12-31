@@ -275,41 +275,27 @@
             // Display extracted data
             elements.extractedDataGrid.innerHTML = '';
             const normalizedData = data.normalized_data || {};
-            const confidenceScores = normalizedData.confidence || {};
 
             console.log('Displaying fields:', Object.keys(normalizedData));
-            console.log('Confidence scores:', confidenceScores);
 
-            // Add overall confidence card first if available
-            if (data.overall_confidence !== undefined) {
-                const overallCard = document.createElement('div');
-                const confidencePercent = Math.round(data.overall_confidence * 100);
-                const confidenceColor = confidencePercent >= 80 ? 'green' : confidencePercent >= 60 ? 'yellow' : 'red';
-                overallCard.className = `p-4 bg-${confidenceColor}-50 rounded-lg border-2 border-${confidenceColor}-200`;
-                overallCard.innerHTML = `
-                    <p class="text-sm text-gray-600 mb-1">Overall Confidence</p>
-                    <p class="font-bold text-2xl text-${confidenceColor}-700">${confidencePercent}%</p>
-                    <p class="text-xs text-gray-500 mt-1">Processing time: ${data.processing_time_ms}ms</p>
-                `;
-                elements.extractedDataGrid.appendChild(overallCard);
-            }
+            // Add processing time card
+            const processingCard = document.createElement('div');
+            processingCard.className = 'p-4 bg-blue-50 rounded-lg border-2 border-blue-200';
+            processingCard.innerHTML = `
+                <p class="text-sm text-gray-600 mb-1">Processing Time</p>
+                <p class="font-bold text-2xl text-blue-700">${data.processing_time_ms}ms</p>
+            `;
+            elements.extractedDataGrid.appendChild(processingCard);
 
             for (const [key, value] of Object.entries(normalizedData)) {
-                if (key === 'confidence') continue;
-
                 const fieldCard = document.createElement('div');
                 fieldCard.className = 'p-4 bg-gray-50 rounded-lg border border-gray-200';
                 const displayValue = value !== null && value !== undefined && value !== ''
                     ? value
                     : '<span class="text-gray-400 italic">Not found</span>';
 
-                const fieldConfidence = confidenceScores[key];
-                const confidenceHTML = fieldConfidence !== undefined
-                    ? `<span class="text-xs ${fieldConfidence >= 0.8 ? 'text-green-600' : fieldConfidence >= 0.6 ? 'text-yellow-600' : 'text-red-600'}">(${Math.round(fieldConfidence * 100)}%)</span>`
-                    : '';
-
                 fieldCard.innerHTML = `
-                    <p class="text-sm text-gray-600 mb-1">${formatFieldName(key)} ${confidenceHTML}</p>
+                    <p class="text-sm text-gray-600 mb-1">${formatFieldName(key)}</p>
                     <p class="font-medium text-gray-900">${displayValue}</p>
                 `;
                 elements.extractedDataGrid.appendChild(fieldCard);
