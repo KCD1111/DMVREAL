@@ -177,13 +177,12 @@ class ModelManager:
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=650,
-                temperature=0.2,
+                max_new_tokens=700,
+                temperature=0.05,
                 do_sample=True,
-                top_p=0.92,
-                top_k=60,
-                repetition_penalty=1.2,
-                no_repeat_ngram_size=3,
+                top_p=0.95,
+                top_k=50,
+                repetition_penalty=1.1,
                 pad_token_id=tokenizer.eos_token_id,
                 eos_token_id=tokenizer.eos_token_id
             )
@@ -201,39 +200,39 @@ class ModelManager:
         logger.info(f"Building prompt with OCR text: {ocr_text_trimmed[:200]}...")
 
         return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-You extract structured data from driver's license OCR text. Read the text provided and output JSON with the extracted values.<|eot_id|><|start_header_id|>user<|end_header_id|>
-Extract information from this driver's license OCR output:
+Extract data from driver's license OCR text and return JSON.<|eot_id|><|start_header_id|>user<|end_header_id|>
+OCR text from driver's license:
 
 {ocr_text_trimmed}
 
-Parse the text above and fill in these fields with values you find:
-- first_name: Look for field "1" or "1HARRISON" or first name after "DRIVER" or "LICENSE"
-- last_name: Look for field "2" or surname
-- license_number: Look for "4d DLN" or "S###-###-###" format or alphanumeric ID near top
-- date_of_birth: Look for "3 DOB" or "3DOB" followed by date (format as MM/DD/YYYY)
-- expiration_date: Look for "4b EXP" or "4bEXP" followed by date (format as MM/DD/YYYY)
-- street_address: Look for field "8" followed by street number and name
-- city: Look for city name after address, before state
-- state: Look for 2-letter state code (like KY, CA, NY, TX)
-- zip_code: Look for 5-digit zip code
-- sex: Look for "15 SEX" or "SEX" followed by M or F
+Find these values in the text above:
+- First name (look for "1" label)
+- Last name (look for "2" label)
+- License number (look for "4d DLN" label)
+- Birth date (look for "3 DOB" label, format MM/DD/YYYY)
+- Expiration date (look for "4b EXP" or "4bEXP" label, format MM/DD/YYYY)
+- Street address (look for "8" label)
+- City (city name before state)
+- State (2-letter code like KY)
+- Zip code (5 digits)
+- Sex (look for "15 SEX" label, M or F)
 
-Return this exact JSON structure with values from the OCR text above:
+Return JSON with this exact structure:
 {{
-  "first_name": "<extract from text>",
-  "last_name": "<extract from text>",
-  "license_number": "<extract from text>",
-  "date_of_birth": "<extract from text in MM/DD/YYYY format>",
-  "expiration_date": "<extract from text in MM/DD/YYYY format>",
-  "street_address": "<extract from text>",
-  "city": "<extract from text>",
-  "state": "<extract 2-letter code>",
-  "zip_code": "<extract from text>",
-  "sex": "<extract M or F>",
-  "confidence": {{"first_name": 0.9, "last_name": 0.9, "license_number": 0.9, "date_of_birth": 0.9, "expiration_date": 0.9, "street_address": 0.85, "city": 0.85, "state": 0.9, "zip_code": 0.85, "sex": 0.9}}
+  "first_name": null,
+  "last_name": null,
+  "license_number": null,
+  "date_of_birth": null,
+  "expiration_date": null,
+  "street_address": null,
+  "city": null,
+  "state": null,
+  "zip_code": null,
+  "sex": null,
+  "confidence": {{"first_name": 0.9, "last_name": 0.9, "license_number": 0.9, "date_of_birth": 0.9, "expiration_date": 0.9, "street_address": 0.9, "city": 0.9, "state": 0.9, "zip_code": 0.9, "sex": 0.9}}
 }}
 
-Use null if field not found. Extract from the OCR text provided above only.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Replace null with actual values from the OCR text. Keep the exact same JSON structure.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 {{"""
 
     def _parse_llama_response(self, response):
@@ -276,6 +275,27 @@ Use null if field not found. Extract from the OCR text provided above only.<|eot
                     data = json.loads(json_str)
                     logger.info("✓ Successfully parsed JSON from LLAMA response")
                     logger.info(f"Extracted fields: {list(data.keys())}")
+
+                    # Validate JSON structure - must be flat with expected field names
+                    expected_fields = {'first_name', 'last_name', 'license_number', 'date_of_birth',
+                                     'expiration_date', 'street_address', 'city', 'state', 'zip_code', 'sex'}
+                    actual_fields = set(data.keys()) - {'confidence'}
+
+                    # Check if structure is wrong (nested objects instead of flat)
+                    if 'name' in data or 'driver_info' in data or 'address' in data:
+                        logger.warning("Model returned nested JSON structure instead of flat structure!")
+                        logger.warning(f"Wrong structure detected: {list(data.keys())}")
+                        continue
+
+                    # Check if any field is a dict/list (should all be strings or null)
+                    has_nested = False
+                    for field, value in data.items():
+                        if field != 'confidence' and value is not None and not isinstance(value, (str, int, float)):
+                            logger.warning(f"Field '{field}' has nested structure (type: {type(value)}), expecting flat string!")
+                            has_nested = True
+                            break
+                    if has_nested:
+                        continue
 
                     # Validate that we have actual data, not placeholder text or example data
                     if data.get('first_name') and isinstance(data['first_name'], str):
