@@ -191,6 +191,9 @@ class ModelManager:
 
         extracted_data = self._parse_llama_response(response)
 
+        # Apply fallback extraction for validation
+        extracted_data = self._apply_fallback_extraction(ocr_text, extracted_data)
+
         return extracted_data
 
     def _build_extraction_prompt(self, ocr_text):
@@ -205,22 +208,17 @@ OCR text from driver's license:
 
 {ocr_text_trimmed}
 
-Extract these fields from the OCR text above:
-- First name: Text after "1" or "1 " (may be one word like "HARRISON")
-- Last name: Text after "2" or "2 " (extract ALL words on that line, like "MONA COOPER")
-- License number: Text after "4d DLN" (do NOT include "4d DLN" itself)
-- Birth date: Date after "3 DOB" or "3DOB" (format as MM/DD/YYYY)
-- Expiration date: Date after "4b EXP" or "4bEXP" (format as MM/DD/YYYY)
-- Street address: Text after "8" or address line
-- City: City name (usually before comma and state)
-- State: 2-letter code (KY, CA, TX, etc.)
-- Zip code: 5-digit number
-- Sex: Letter after "15 SEX" or "SEX" (extract exactly: M or F)
-
-IMPORTANT:
-- For last name (field "2"): Extract ALL words on that line (e.g., "MONA COOPER" not just "COOPER")
-- For license number: Do NOT include the label "4d DLN"
-- For sex: Look carefully at what letter appears after "SEX"
+Find these values in the text above:
+- First name (look for "1" label, extract the name after it)
+- Last name (look for "2" label, extract all words after it - may be multiple words)
+- License number (look for "4d DLN" label, extract only the number after it)
+- Birth date (look for "3 DOB" label, format MM/DD/YYYY)
+- Expiration date (look for "4b EXP" or "4bEXP" label, format MM/DD/YYYY)
+- Street address (look for "8" label)
+- City (city name before state)
+- State (2-letter code like KY)
+- Zip code (5 digits)
+- Sex (look for "15 SEX" label - carefully extract M or F)
 
 Return JSON with this exact structure:
 {{
@@ -237,7 +235,7 @@ Return JSON with this exact structure:
   "confidence": {{"first_name": 0.9, "last_name": 0.9, "license_number": 0.9, "date_of_birth": 0.9, "expiration_date": 0.9, "street_address": 0.9, "city": 0.9, "state": 0.9, "zip_code": 0.9, "sex": 0.9}}
 }}
 
-Replace null with actual values. Extract exactly what you see.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Replace null with actual values from the OCR text. Keep the exact same JSON structure.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 {{"""
 
     def _parse_llama_response(self, response):
@@ -402,6 +400,78 @@ Replace null with actual values. Extract exactly what you see.<|eot_id|><|start_
                 "sex": 0.0
             }
         }
+
+    def _apply_fallback_extraction(self, ocr_text, extracted_data):
+        """Use regex patterns as a fallback to validate/correct extracted fields"""
+        import re
+
+        logger.info("Applying fallback extraction validation...")
+
+        # Create a copy to modify
+        corrected = extracted_data.copy()
+
+        # Fallback for Sex field (common issue)
+        sex_match = re.search(r'15\s*SEX\s+([MF])', ocr_text, re.IGNORECASE)
+        if sex_match:
+            fallback_sex = sex_match.group(1).upper()
+            if extracted_data.get('sex') != fallback_sex:
+                logger.info(f"Correcting sex: '{extracted_data.get('sex')}' -> '{fallback_sex}' (from regex)")
+                corrected['sex'] = fallback_sex
+                if isinstance(corrected.get('confidence'), dict):
+                    corrected['confidence']['sex'] = 0.95
+
+        # Fallback for License Number (should not contain address parts)
+        license_num = extracted_data.get('license_number', '')
+        if license_num and ('E' in license_num and 'ST' in license_num):
+            # Likely extracted street address instead
+            logger.warning(f"License number appears to be street address: '{license_num}'")
+            # Try to find the actual license number
+            dln_match = re.search(r'4d\s*DLN\s+([A-Z0-9-]+)', ocr_text, re.IGNORECASE)
+            if dln_match:
+                fallback_license = dln_match.group(1)
+                logger.info(f"Correcting license number: '{license_num}' -> '{fallback_license}'")
+                corrected['license_number'] = fallback_license
+                if isinstance(corrected.get('confidence'), dict):
+                    corrected['confidence']['license_number'] = 0.85
+
+        # Fallback for Last Name (field "2" - may have multiple words)
+        last_name = extracted_data.get('last_name', '')
+        if last_name and len(last_name.split()) == 1:
+            # Try to find multi-word last name
+            name_match = re.search(r'2\s+([A-Z][A-Z\s]+?)(?:\n|3\s|$)', ocr_text)
+            if name_match:
+                fallback_name = name_match.group(1).strip()
+                if len(fallback_name.split()) > 1:
+                    logger.info(f"Correcting last name: '{last_name}' -> '{fallback_name}' (multi-word)")
+                    corrected['last_name'] = fallback_name.title()
+                    if isinstance(corrected.get('confidence'), dict):
+                        corrected['confidence']['last_name'] = 0.80
+
+        # Fallback for DOB - should be in 1900s/early 2000s for most licenses
+        dob = extracted_data.get('date_of_birth', '')
+        if dob and '/2020' in dob:
+            # Very unlikely - probably parsing error
+            dob_match = re.search(r'3\s*DOB\s+(\d{2}/\d{2}/\d{4})', ocr_text)
+            if dob_match:
+                fallback_dob = dob_match.group(1)
+                logger.info(f"Correcting DOB: '{dob}' -> '{fallback_dob}' (suspicious year)")
+                corrected['date_of_birth'] = fallback_dob
+                if isinstance(corrected.get('confidence'), dict):
+                    corrected['confidence']['date_of_birth'] = 0.85
+
+        # Fallback for Expiration - should typically be future date
+        exp_date = extracted_data.get('expiration_date', '')
+        if exp_date and '/2020' in exp_date:
+            # Likely wrong or expired
+            exp_match = re.search(r'4b\s*EXP\s+(\d{2}/\d{2}/\d{4})', ocr_text)
+            if exp_match:
+                fallback_exp = exp_match.group(1)
+                logger.info(f"Correcting expiration: '{exp_date}' -> '{fallback_exp}'")
+                corrected['expiration_date'] = fallback_exp
+                if isinstance(corrected.get('confidence'), dict):
+                    corrected['confidence']['expiration_date'] = 0.85
+
+        return corrected
 
     def process_sequential(self, image_paths):
         logger.info("Processing with sequential model loading (memory-efficient mode)")
