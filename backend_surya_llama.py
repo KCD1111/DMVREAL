@@ -10,6 +10,7 @@ import logging
 from model_manager import ModelManager
 from license_extractor import LicenseExtractor
 from database import DatabaseManager
+from image_preprocessor import ImagePreprocessor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 model_manager = ModelManager()
 license_extractor = LicenseExtractor()
 db_manager = DatabaseManager()
+image_preprocessor = ImagePreprocessor()
 
 ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'heic', 'heif'}
 ALLOWED_DOCUMENT_EXTENSIONS = {'pdf'}
@@ -104,9 +106,17 @@ def process_document():
                 temp_files.append(processed_image)
             image_paths = [processed_image]
 
-        logger.info(f"Processing {len(image_paths)} image(s) with Surya + LLAMA...")
+        logger.info(f"Preprocessing {len(image_paths)} image(s) with OpenCV...")
+        preprocessed_paths = []
+        for img_path in image_paths:
+            preprocessed_path = image_preprocessor.preprocess_for_ocr(img_path)
+            preprocessed_paths.append(preprocessed_path)
+            if preprocessed_path != img_path:
+                temp_files.append(preprocessed_path)
 
-        results = model_manager.process_sequential(image_paths)
+        logger.info(f"Processing {len(preprocessed_paths)} image(s) with Surya + LLAMA...")
+
+        results = model_manager.process_sequential(preprocessed_paths)
 
         if not results or len(results) == 0:
             raise Exception("No OCR results returned")
