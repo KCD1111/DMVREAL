@@ -10,10 +10,18 @@ import logging
 from model_manager import ModelManager
 from license_extractor import LicenseExtractor
 from database import DatabaseManager
-from image_preprocessor import ImagePreprocessor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+try:
+    from image_preprocessor import ImagePreprocessor
+    OPENCV_AVAILABLE = True
+    logger.info("OpenCV preprocessing: ENABLED")
+except ImportError as e:
+    OPENCV_AVAILABLE = False
+    logger.warning(f"OpenCV preprocessing: DISABLED (missing dependencies: {e})")
+    logger.warning("Install with: pip install opencv-python-headless numpy")
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -21,7 +29,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 model_manager = ModelManager()
 license_extractor = LicenseExtractor()
 db_manager = DatabaseManager()
-image_preprocessor = ImagePreprocessor()
+image_preprocessor = ImagePreprocessor() if OPENCV_AVAILABLE else None
 
 ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'heic', 'heif'}
 ALLOWED_DOCUMENT_EXTENSIONS = {'pdf'}
@@ -106,13 +114,17 @@ def process_document():
                 temp_files.append(processed_image)
             image_paths = [processed_image]
 
-        logger.info(f"Preprocessing {len(image_paths)} image(s) with OpenCV...")
-        preprocessed_paths = []
-        for img_path in image_paths:
-            preprocessed_path = image_preprocessor.preprocess_for_ocr(img_path)
-            preprocessed_paths.append(preprocessed_path)
-            if preprocessed_path != img_path:
-                temp_files.append(preprocessed_path)
+        if OPENCV_AVAILABLE:
+            logger.info(f"Preprocessing {len(image_paths)} image(s) with OpenCV...")
+            preprocessed_paths = []
+            for img_path in image_paths:
+                preprocessed_path = image_preprocessor.preprocess_for_ocr(img_path)
+                preprocessed_paths.append(preprocessed_path)
+                if preprocessed_path != img_path:
+                    temp_files.append(preprocessed_path)
+        else:
+            logger.info("Skipping preprocessing (OpenCV not available)")
+            preprocessed_paths = image_paths
 
         logger.info(f"Processing {len(preprocessed_paths)} image(s) with Surya + LLAMA...")
 
@@ -230,7 +242,8 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'message': 'DMV OCR Backend (Surya + LLAMA) is running',
-        'device': model_manager.device
+        'device': model_manager.device,
+        'opencv_preprocessing': 'enabled' if OPENCV_AVAILABLE else 'disabled'
     }), 200
 
 if __name__ == '__main__':
