@@ -205,17 +205,22 @@ OCR text from driver's license:
 
 {ocr_text_trimmed}
 
-Find these values in the text above:
-- First name (look for "1" label)
-- Last name (look for "2" label)
-- License number (look for "4d DLN" label)
-- Birth date (look for "3 DOB" label, format MM/DD/YYYY)
-- Expiration date (look for "4b EXP" or "4bEXP" label, format MM/DD/YYYY)
-- Street address (look for "8" label)
-- City (city name before state)
-- State (2-letter code like KY)
-- Zip code (5 digits)
-- Sex (look for "15 SEX" label, M or F)
+Extract these fields from the OCR text above:
+- First name: Text after "1" or "1 " (may be one word like "HARRISON")
+- Last name: Text after "2" or "2 " (extract ALL words on that line, like "MONA COOPER")
+- License number: Text after "4d DLN" (do NOT include "4d DLN" itself)
+- Birth date: Date after "3 DOB" or "3DOB" (format as MM/DD/YYYY)
+- Expiration date: Date after "4b EXP" or "4bEXP" (format as MM/DD/YYYY)
+- Street address: Text after "8" or address line
+- City: City name (usually before comma and state)
+- State: 2-letter code (KY, CA, TX, etc.)
+- Zip code: 5-digit number
+- Sex: Letter after "15 SEX" or "SEX" (extract exactly: M or F)
+
+IMPORTANT:
+- For last name (field "2"): Extract ALL words on that line (e.g., "MONA COOPER" not just "COOPER")
+- For license number: Do NOT include the label "4d DLN"
+- For sex: Look carefully at what letter appears after "SEX"
 
 Return JSON with this exact structure:
 {{
@@ -232,7 +237,7 @@ Return JSON with this exact structure:
   "confidence": {{"first_name": 0.9, "last_name": 0.9, "license_number": 0.9, "date_of_birth": 0.9, "expiration_date": 0.9, "street_address": 0.9, "city": 0.9, "state": 0.9, "zip_code": 0.9, "sex": 0.9}}
 }}
 
-Replace null with actual values from the OCR text. Keep the exact same JSON structure.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Replace null with actual values. Extract exactly what you see.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 {{"""
 
     def _parse_llama_response(self, response):

@@ -60,6 +60,12 @@ class LicenseExtractor:
         # Filter out placeholder text
         if 'string' in license_str.lower() or 'or' in license_str.lower():
             return None
+
+        # Remove common license number label prefixes
+        # Examples: "4d DLN S123-456-789", "DL# 12345", "LIC# 12345"
+        license_str = re.sub(r'^(4d\s*DLN|DL#?|LIC#?|LICENSE#?)\s*', '', license_str, flags=re.IGNORECASE)
+
+        # Remove spaces and convert to uppercase
         return re.sub(r'\s+', '', license_str.upper())
 
     def _normalize_date(self, date_str):
