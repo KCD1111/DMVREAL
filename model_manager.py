@@ -252,113 +252,123 @@ Replace null with actual values from the OCR text. Keep the exact same JSON stru
             response = response.split(assistant_marker)[-1].strip()
             logger.info(f"Extracted assistant portion: {response[:200]}...")
 
-        # Try to find complete JSON object
-        json_patterns = [
-            r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Nested JSON with one level
-            r'\{.*?"first_name".*?\}',  # JSON containing first_name
-            r'\{.*?\}',  # Any JSON object
-        ]
+        # Find ALL JSON objects in the response
+        # The model may output the template first, then the actual data
+        json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        all_json_matches = re.findall(json_pattern, response, re.DOTALL)
 
-        for pattern in json_patterns:
-            json_match = re.search(pattern, response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
+        logger.info(f"Found {len(all_json_matches)} potential JSON blocks")
 
-                # Clean up the JSON string
-                json_str = json_str.strip()
-                json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
-                json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
+        # Try to parse each JSON block and score them
+        valid_jsons = []
+        for idx, json_str in enumerate(all_json_matches):
+            # Clean up the JSON string
+            json_str = json_str.strip()
+            json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
+            json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
 
-                logger.info(f"Attempting to parse JSON: {json_str[:300]}...")
+            logger.info(f"Attempting to parse JSON block {idx+1}: {json_str[:150]}...")
 
-                try:
-                    data = json.loads(json_str)
-                    logger.info("✓ Successfully parsed JSON from LLAMA response")
-                    logger.info(f"Extracted fields: {list(data.keys())}")
+            try:
+                data = json.loads(json_str)
 
-                    # Validate JSON structure - must be flat with expected field names
-                    expected_fields = {'first_name', 'last_name', 'license_number', 'date_of_birth',
-                                     'expiration_date', 'street_address', 'city', 'state', 'zip_code', 'sex'}
-                    actual_fields = set(data.keys()) - {'confidence'}
+                # Count non-null values (excluding confidence)
+                non_null_count = sum(1 for k, v in data.items()
+                                    if k != 'confidence' and v is not None and v != "")
 
-                    # Check if structure is wrong (nested objects instead of flat)
-                    if 'name' in data or 'driver_info' in data or 'address' in data:
-                        logger.warning("Model returned nested JSON structure instead of flat structure!")
-                        logger.warning(f"Wrong structure detected: {list(data.keys())}")
-                        continue
+                logger.info(f"✓ Block {idx+1} parsed successfully - {non_null_count} non-null fields")
+                valid_jsons.append((data, non_null_count, idx))
+            except json.JSONDecodeError as e:
+                logger.warning(f"✗ Block {idx+1} failed to parse: {e}")
+                continue
 
-                    # Check if any field is a dict/list (should all be strings or null)
-                    has_nested = False
-                    for field, value in data.items():
-                        if field != 'confidence' and value is not None and not isinstance(value, (str, int, float)):
-                            logger.warning(f"Field '{field}' has nested structure (type: {type(value)}), expecting flat string!")
-                            has_nested = True
-                            break
-                    if has_nested:
-                        continue
+        # Sort by non-null count (descending) - prefer the one with most actual data
+        valid_jsons.sort(key=lambda x: x[1], reverse=True)
 
-                    # Validate that we have actual data, not placeholder text or example data
-                    if data.get('first_name') and isinstance(data['first_name'], str):
-                        first_name_lower = data['first_name'].lower()
-                        if 'string' in first_name_lower or 'null' in first_name_lower:
-                            logger.warning("Model returned placeholder text instead of actual data!")
-                            continue
-                        if '<extract' in first_name_lower or 'extract from' in first_name_lower:
-                            logger.warning("Model returned template placeholder instead of extracting!")
-                            continue
-                        # Check if model returned the example data instead of extracting from OCR
-                        if first_name_lower == 'john' and data.get('last_name', '').lower() == 'smith':
-                            logger.warning("Model returned example data (John Smith) instead of extracting from OCR text!")
-                            continue
+        # Try each valid JSON, starting with the one with most non-null values
+        for data, non_null_count, idx in valid_jsons:
+            logger.info(f"Validating block {idx+1} with {non_null_count} non-null fields")
+            logger.info(f"Extracted fields: {list(data.keys())}")
 
-                    # Ensure all expected fields exist
-                    default_structure = {
-                        "first_name": None,
-                        "last_name": None,
-                        "license_number": None,
-                        "date_of_birth": None,
-                        "expiration_date": None,
-                        "street_address": None,
-                        "city": None,
-                        "state": None,
-                        "zip_code": None,
-                        "sex": None,
-                        "confidence": {
-                            "first_name": 0.5,
-                            "last_name": 0.5,
-                            "license_number": 0.5,
-                            "date_of_birth": 0.5,
-                            "expiration_date": 0.5,
-                            "street_address": 0.5,
-                            "city": 0.5,
-                            "state": 0.5,
-                            "zip_code": 0.5,
-                            "sex": 0.5
-                        }
-                    }
-                    default_structure.update(data)
+            # Validate JSON structure - must be flat with expected field names
+            expected_fields = {'first_name', 'last_name', 'license_number', 'date_of_birth',
+                             'expiration_date', 'street_address', 'city', 'state', 'zip_code', 'sex'}
+            actual_fields = set(data.keys()) - {'confidence'}
 
-                    # Ensure confidence is a dict
-                    if not isinstance(default_structure.get('confidence'), dict):
-                        default_structure['confidence'] = default_structure['confidence'] if isinstance(default_structure.get('confidence'), dict) else {
-                            "first_name": 0.5,
-                            "last_name": 0.5,
-                            "license_number": 0.5,
-                            "date_of_birth": 0.5,
-                            "expiration_date": 0.5,
-                            "street_address": 0.5,
-                            "city": 0.5,
-                            "state": 0.5,
-                            "zip_code": 0.5,
-                            "sex": 0.5
-                        }
+            # Check if structure is wrong (nested objects instead of flat)
+            if 'name' in data or 'driver_info' in data or 'address' in data:
+                logger.warning("Model returned nested JSON structure instead of flat structure!")
+                logger.warning(f"Wrong structure detected: {list(data.keys())}")
+                continue
 
-                    return default_structure
+            # Check if any field is a dict/list (should all be strings or null)
+            has_nested = False
+            for field, value in data.items():
+                if field != 'confidence' and value is not None and not isinstance(value, (str, int, float)):
+                    logger.warning(f"Field '{field}' has nested structure (type: {type(value)}), expecting flat string!")
+                    has_nested = True
+                    break
+            if has_nested:
+                continue
 
-                except json.JSONDecodeError as e:
-                    logger.warning(f"JSON parse attempt failed: {e}")
-                    logger.warning(f"Failed JSON string: {json_str[:200]}...")
+            # Validate that we have actual data, not placeholder text or example data
+            if data.get('first_name') and isinstance(data['first_name'], str):
+                first_name_lower = data['first_name'].lower()
+                if 'string' in first_name_lower or 'null' in first_name_lower:
+                    logger.warning("Model returned placeholder text instead of actual data!")
                     continue
+                if '<extract' in first_name_lower or 'extract from' in first_name_lower:
+                    logger.warning("Model returned template placeholder instead of extracting!")
+                    continue
+                # Check if model returned the example data instead of extracting from OCR
+                if first_name_lower == 'john' and data.get('last_name', '').lower() == 'smith':
+                    logger.warning("Model returned example data (John Smith) instead of extracting from OCR text!")
+                    continue
+
+            # Ensure all expected fields exist
+            default_structure = {
+                "first_name": None,
+                "last_name": None,
+                "license_number": None,
+                "date_of_birth": None,
+                "expiration_date": None,
+                "street_address": None,
+                "city": None,
+                "state": None,
+                "zip_code": None,
+                "sex": None,
+                "confidence": {
+                    "first_name": 0.5,
+                    "last_name": 0.5,
+                    "license_number": 0.5,
+                    "date_of_birth": 0.5,
+                    "expiration_date": 0.5,
+                    "street_address": 0.5,
+                    "city": 0.5,
+                    "state": 0.5,
+                    "zip_code": 0.5,
+                    "sex": 0.5
+                }
+            }
+            default_structure.update(data)
+
+            # Ensure confidence is a dict
+            if not isinstance(default_structure.get('confidence'), dict):
+                default_structure['confidence'] = {
+                    "first_name": 0.5,
+                    "last_name": 0.5,
+                    "license_number": 0.5,
+                    "date_of_birth": 0.5,
+                    "expiration_date": 0.5,
+                    "street_address": 0.5,
+                    "city": 0.5,
+                    "state": 0.5,
+                    "zip_code": 0.5,
+                    "sex": 0.5
+                }
+
+            logger.info(f"✓ Using block {idx+1} with {non_null_count} non-null values")
+            return default_structure
 
         logger.error("✗ Failed to parse valid JSON from LLAMA response after all attempts")
         logger.error(f"Full response: {response}")
