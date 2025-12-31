@@ -119,17 +119,13 @@ def process_document():
 
         validation_report = license_extractor.validate_data(normalized_data)
 
-        overall_confidence = license_extractor.calculate_confidence_summary(
-            normalized_data.get('confidence', {})
-        )
-
         processing_time_ms = int((time.time() - start_time) * 1000)
 
         db_manager.update_session(
             session_id,
             status='completed',
             processing_time_ms=processing_time_ms,
-            overall_confidence=overall_confidence
+            overall_confidence=0.0
         )
 
         license_id = db_manager.save_extracted_license(
@@ -147,7 +143,6 @@ def process_document():
             'extracted_data': extracted_data,
             'normalized_data': normalized_data,
             'validation_report': validation_report,
-            'overall_confidence': overall_confidence,
             'processing_time_ms': processing_time_ms
         }
 

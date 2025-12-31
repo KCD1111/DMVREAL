@@ -211,7 +211,7 @@ OCR text from driver's license:
 Find these values in the text above:
 - First name (look for "1" label, extract the name after it)
 - Last name (look for "2" label, extract all words after it - may be multiple words)
-- License number (look for "4d DLN" label, extract only the number after it)
+- DLN (look for "4d DLN" label, extract only the number after it)
 - Birth date (look for "3 DOB" label, format MM/DD/YYYY)
 - Expiration date (look for "4b EXP" or "4bEXP" label, format MM/DD/YYYY)
 - Street address (look for "8" label)
@@ -224,15 +224,14 @@ Return JSON with this exact structure:
 {{
   "first_name": null,
   "last_name": null,
-  "license_number": null,
+  "dln": null,
   "date_of_birth": null,
   "expiration_date": null,
   "street_address": null,
   "city": null,
   "state": null,
   "zip_code": null,
-  "sex": null,
-  "confidence": {{"first_name": 0.9, "last_name": 0.9, "license_number": 0.9, "date_of_birth": 0.9, "expiration_date": 0.9, "street_address": 0.9, "city": 0.9, "state": 0.9, "zip_code": 0.9, "sex": 0.9}}
+  "sex": null
 }}
 
 Replace null with actual values from the OCR text. Keep the exact same JSON structure.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
@@ -294,9 +293,9 @@ Replace null with actual values from the OCR text. Keep the exact same JSON stru
             logger.info(f"Extracted fields: {list(data.keys())}")
 
             # Validate JSON structure - must be flat with expected field names
-            expected_fields = {'first_name', 'last_name', 'license_number', 'date_of_birth',
+            expected_fields = {'first_name', 'last_name', 'dln', 'date_of_birth',
                              'expiration_date', 'street_address', 'city', 'state', 'zip_code', 'sex'}
-            actual_fields = set(data.keys()) - {'confidence'}
+            actual_fields = set(data.keys())
 
             # Check if structure is wrong (nested objects instead of flat)
             if 'name' in data or 'driver_info' in data or 'address' in data:
@@ -307,7 +306,7 @@ Replace null with actual values from the OCR text. Keep the exact same JSON stru
             # Check if any field is a dict/list (should all be strings or null)
             has_nested = False
             for field, value in data.items():
-                if field != 'confidence' and value is not None and not isinstance(value, (str, int, float)):
+                if value is not None and not isinstance(value, (str, int, float)):
                     logger.warning(f"Field '{field}' has nested structure (type: {type(value)}), expecting flat string!")
                     has_nested = True
                     break
@@ -332,43 +331,16 @@ Replace null with actual values from the OCR text. Keep the exact same JSON stru
             default_structure = {
                 "first_name": None,
                 "last_name": None,
-                "license_number": None,
+                "dln": None,
                 "date_of_birth": None,
                 "expiration_date": None,
                 "street_address": None,
                 "city": None,
                 "state": None,
                 "zip_code": None,
-                "sex": None,
-                "confidence": {
-                    "first_name": 0.5,
-                    "last_name": 0.5,
-                    "license_number": 0.5,
-                    "date_of_birth": 0.5,
-                    "expiration_date": 0.5,
-                    "street_address": 0.5,
-                    "city": 0.5,
-                    "state": 0.5,
-                    "zip_code": 0.5,
-                    "sex": 0.5
-                }
+                "sex": None
             }
             default_structure.update(data)
-
-            # Ensure confidence is a dict
-            if not isinstance(default_structure.get('confidence'), dict):
-                default_structure['confidence'] = {
-                    "first_name": 0.5,
-                    "last_name": 0.5,
-                    "license_number": 0.5,
-                    "date_of_birth": 0.5,
-                    "expiration_date": 0.5,
-                    "street_address": 0.5,
-                    "city": 0.5,
-                    "state": 0.5,
-                    "zip_code": 0.5,
-                    "sex": 0.5
-                }
 
             logger.info(f"✓ Using block {idx+1} with {non_null_count} non-null values")
             return default_structure
@@ -379,26 +351,14 @@ Replace null with actual values from the OCR text. Keep the exact same JSON stru
         return {
             "first_name": None,
             "last_name": None,
-            "license_number": None,
+            "dln": None,
             "date_of_birth": None,
             "expiration_date": None,
             "street_address": None,
             "city": None,
             "state": None,
             "zip_code": None,
-            "sex": None,
-            "confidence": {
-                "first_name": 0.0,
-                "last_name": 0.0,
-                "license_number": 0.0,
-                "date_of_birth": 0.0,
-                "expiration_date": 0.0,
-                "street_address": 0.0,
-                "city": 0.0,
-                "state": 0.0,
-                "zip_code": 0.0,
-                "sex": 0.0
-            }
+            "sex": None
         }
 
     def _apply_fallback_extraction(self, ocr_text, extracted_data):
@@ -417,22 +377,18 @@ Replace null with actual values from the OCR text. Keep the exact same JSON stru
             if extracted_data.get('sex') != fallback_sex:
                 logger.info(f"Correcting sex: '{extracted_data.get('sex')}' -> '{fallback_sex}' (from regex)")
                 corrected['sex'] = fallback_sex
-                if isinstance(corrected.get('confidence'), dict):
-                    corrected['confidence']['sex'] = 0.95
 
-        # Fallback for License Number (should not contain address parts)
-        license_num = extracted_data.get('license_number', '')
-        if license_num and ('E' in license_num and 'ST' in license_num):
+        # Fallback for DLN (should not contain address parts)
+        dln = extracted_data.get('dln', '')
+        if dln and ('E' in dln and 'ST' in dln):
             # Likely extracted street address instead
-            logger.warning(f"License number appears to be street address: '{license_num}'")
-            # Try to find the actual license number
+            logger.warning(f"DLN appears to be street address: '{dln}'")
+            # Try to find the actual DLN
             dln_match = re.search(r'4d\s*DLN\s+([A-Z0-9-]+)', ocr_text, re.IGNORECASE)
             if dln_match:
-                fallback_license = dln_match.group(1)
-                logger.info(f"Correcting license number: '{license_num}' -> '{fallback_license}'")
-                corrected['license_number'] = fallback_license
-                if isinstance(corrected.get('confidence'), dict):
-                    corrected['confidence']['license_number'] = 0.85
+                fallback_dln = dln_match.group(1)
+                logger.info(f"Correcting DLN: '{dln}' -> '{fallback_dln}'")
+                corrected['dln'] = fallback_dln
 
         # Fallback for Last Name (field "2" - may have multiple words)
         last_name = extracted_data.get('last_name', '')
@@ -444,8 +400,6 @@ Replace null with actual values from the OCR text. Keep the exact same JSON stru
                 if len(fallback_name.split()) > 1:
                     logger.info(f"Correcting last name: '{last_name}' -> '{fallback_name}' (multi-word)")
                     corrected['last_name'] = fallback_name.title()
-                    if isinstance(corrected.get('confidence'), dict):
-                        corrected['confidence']['last_name'] = 0.80
 
         # Fallback for DOB - should be in 1900s/early 2000s for most licenses
         dob = extracted_data.get('date_of_birth', '')
@@ -456,8 +410,6 @@ Replace null with actual values from the OCR text. Keep the exact same JSON stru
                 fallback_dob = dob_match.group(1)
                 logger.info(f"Correcting DOB: '{dob}' -> '{fallback_dob}' (suspicious year)")
                 corrected['date_of_birth'] = fallback_dob
-                if isinstance(corrected.get('confidence'), dict):
-                    corrected['confidence']['date_of_birth'] = 0.85
 
         # Fallback for Expiration - should typically be future date
         exp_date = extracted_data.get('expiration_date', '')
@@ -468,8 +420,6 @@ Replace null with actual values from the OCR text. Keep the exact same JSON stru
                 fallback_exp = exp_match.group(1)
                 logger.info(f"Correcting expiration: '{exp_date}' -> '{fallback_exp}'")
                 corrected['expiration_date'] = fallback_exp
-                if isinstance(corrected.get('confidence'), dict):
-                    corrected['confidence']['expiration_date'] = 0.85
 
         return corrected
 
