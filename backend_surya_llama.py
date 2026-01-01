@@ -17,11 +17,17 @@ logger = logging.getLogger(__name__)
 try:
     from image_preprocessor import ImagePreprocessor
     OPENCV_AVAILABLE = True
-    logger.info("OpenCV preprocessing: ENABLED")
+    logger.info("OpenCV preprocessing: AVAILABLE")
 except ImportError as e:
     OPENCV_AVAILABLE = False
     logger.warning(f"OpenCV preprocessing: DISABLED (missing dependencies: {e})")
     logger.warning("Install with: pip install opencv-python-headless numpy")
+
+USE_PREPROCESSING = False
+if USE_PREPROCESSING:
+    logger.info("Image preprocessing: ENABLED")
+else:
+    logger.info("Image preprocessing: DISABLED (using original images for OCR)")
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -114,7 +120,7 @@ def process_document():
                 temp_files.append(processed_image)
             image_paths = [processed_image]
 
-        if OPENCV_AVAILABLE:
+        if USE_PREPROCESSING and OPENCV_AVAILABLE:
             logger.info(f"Preprocessing {len(image_paths)} image(s) with OpenCV...")
             preprocessed_paths = []
             for img_path in image_paths:
@@ -123,7 +129,7 @@ def process_document():
                 if preprocessed_path != img_path:
                     temp_files.append(preprocessed_path)
         else:
-            logger.info("Skipping preprocessing (OpenCV not available)")
+            logger.info("Using original images for OCR (preprocessing disabled)")
             preprocessed_paths = image_paths
 
         logger.info(f"Processing {len(preprocessed_paths)} image(s) with Surya + LLAMA...")
@@ -243,7 +249,8 @@ def health_check():
         'status': 'healthy',
         'message': 'DMV OCR Backend (Surya + LLAMA) is running',
         'device': model_manager.device,
-        'opencv_preprocessing': 'enabled' if OPENCV_AVAILABLE else 'disabled'
+        'opencv_available': OPENCV_AVAILABLE,
+        'preprocessing_enabled': USE_PREPROCESSING
     }), 200
 
 if __name__ == '__main__':
